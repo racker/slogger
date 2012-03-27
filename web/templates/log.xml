@@ -1,0 +1,39 @@
+<!-- View Logs
+================================================== -->
+<div class="container-fluid" xmlns:t="http://twistedmatrix.com/ns/twisted.web.template/0.1">
+  <div class="row-fluid">
+    <div class="span3">
+      <div class="well sidebar-nav">
+        <ul class="nav nav-list">
+          <li class="nav-header">Stats</li>
+          <li><a href="#">Link</a></li>
+          <li class="nav-header">Dates</li>
+          <li class="nav-header">Users</li>
+          <li t:render="faceted_users">
+            <a><t:attr name="href"><t:slot name="user_url"/></t:attr>
+              <t:slot name="user_name"/>
+            </a>
+          </li>
+        </ul>
+      </div><!--/.well -->
+    </div><!--/span-->
+    <div class="span9">
+      <div class="irc_message row-fluid" t:render="messages">
+        <div class="irc_channel span2">[<t:slot name="channel"/>]</div>
+        <div class="irc_username span2">
+            <span class="bracket">&lt;</span>
+            <t:slot name="username"/>
+            <span class="bracket">&gt;</span>
+        </div>
+        <div class="irc_text span4"><t:slot name="text"/></div>
+        <div class="irc_time span2"><t:slot name="time"/></div>
+      </div>
+    </div><!--/span-->
+  </div><!--/row-->
+
+  <hr />
+
+  <footer>
+    <p>&#x00A9; Company 2012</p>
+  </footer>
+</div> <!--/.fluid-container-->
