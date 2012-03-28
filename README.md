@@ -6,7 +6,7 @@ slogger - slog through your irc logs
 2. download elasticsearch and start it with
     `${ELASTIC_SEARCH_DIR}/bin/elasticsearch`
 
-3. edit `settings.py` with the relevant information
+3. `cp settings.example.py settings.py`
 
 4. `twistd -n -y slogger.py`
 

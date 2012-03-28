@@ -3,7 +3,7 @@ DEBUG = False
 ########################
 # IRC NETWORK SETTINGS #
 ########################
-NICK = 'test_slogger_nick'
+NICK = 'test_slogger_kansface'
 ALT_NICK = '_test_slogger_nick'
 IRC_HOST = 'irc.freenode.net'
 IRC_PORT = 6667
