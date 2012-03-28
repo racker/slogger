@@ -14,14 +14,15 @@
 # -*- test-case-name: slogger.test.test_bot -*-
 
 import time
-import urllib
 
 from twisted.words.protocols import irc
 from twisted.internet import threads, reactor, protocol
-from twisted.python import log, filepath
+from twisted.python import log
 
 import settings
 import loggers
+import events
+
 from elasticsearch import ESLogLine
 from elasticsearch.core import utils
 
@@ -31,10 +32,11 @@ class LogBot(irc.IRCClient):
     nickname = settings.NICK[:16]
     ignorelist = [nick[:16] for nick in settings.IGNORED_USERS]
     _user_left_FP = None
+    log_user = "af3aF&G@#*@#*(#@#*(@&&FHU#IU#HJAF#(@F@#J"
 
-    def writeLog(self, message, user, channel):
+    def writeLog(self, user, channel, event, message=None):
         current_time = time.time()
-        msg = (current_time, message, user, channel)
+        msg = (current_time, user, channel, event, self.factory.irc_host, message)
         for logger in self.loggers:
             logger.log(*msg)
 
@@ -46,11 +48,11 @@ class LogBot(irc.IRCClient):
                 self.factory.log_path, self.factory.channels),
             loggers.BufferedSearchLogger()]
 
-        self.writeLog('CONNECTION ESTABLISHED', 'SYSTEM', 'SYSTEM_LOG')
+        self.writeLog(self.log_user, None, events.CONNECT_EVENT)
 
     def connectionLost(self, reason):
         irc.IRCClient.connectionLost(self, reason)
-        self.writeLog('CONNECTION LOST: %s' % reason, 'SYSTEM', 'SYSTEM_LOG')
+        self.writeLog(self.log_user, None, events.DISCONNECT_EVENT)
 
     def signedOn(self):
         """Called when bot has succesfully signed on to server."""
@@ -60,30 +62,19 @@ class LogBot(irc.IRCClient):
 
     def joined(self, channel):
         """This will get called when the bot joins the channel."""
-        self.writeLog('JOINED CHANNEL (%s)' % channel, 'SYSTEM', 'SYSTEM_LOG')
+        self.writeLog(self.log_user, channel, events.JOIN_EVENT)
 
     def privmsg(self, user, channel, msg):
         """This will get called when the bot receives a message."""
         user = user.split('!', 1)[0]
-
-        if (channel == self.nickname) or (user in self.ignorelist) or (msg.startswith(self.nickname + ":")):
-            current_time = time.time()
-            log.msg(current_time, msg, user, channel)
-        else:
-            self.writeLog(msg, user, channel)
-
-        if user not in self.ignorelist:
-            if channel == self.nickname:  # private message
-                self.handle_command(user, channel, msg)
-            else:
-                self.msg(
-                    channel, "%s: I only answer private messages" % (user,))
+        self.writeLog(user, channel, events.MSG_EVENT, msg)
+        self.handle_command(user, channel, msg)
 
     def userJoined(self, user, channel):
         """
         When the user joins a channel, log the join
         """
-        self.writeLog('%s joined the channel.' % user, None, channel)
+        self.writeLog(user, channel, events.JOIN_EVENT)
         # TODO: this is temporary
         if not self._user_is_self(user):
             self._pm_user_with_last_left(user, channel)
@@ -92,10 +83,7 @@ class LogBot(irc.IRCClient):
         """
         When the user leaves a channel, log the leave
         """
-        self.writeLog('%s left the channel.' % user, None, channel)
-        # don't care about the result
-        if user != self.nickname:
-            self._record_user_last_exit_time(user, channel)
+        self.writeLog(user, channel, events.LEAVE_EVENT)
 
     # Ugliness
 
@@ -176,29 +164,6 @@ class LogBot(irc.IRCClient):
         """
         return user == self.nickname
 
-    def _record_user_last_exit_time(self, user, channel):
-        """
-        Record the current time for the user leaving the channel.  This is
-        horrible and should probably be elsewhere.  Also, async.
-
-        @param user: the username of the user
-        @type user: C{str}
-
-        @param channel: the channel that we want to record the last exit time
-            for.
-        @type channel: C{str}
-        """
-
-        # This is horrible.  Put this info somewhere else.
-        if not self._user_left_FP:
-            self._user_left_FP = filepath.FilePath('.lastexit')
-            if not self._user_left_FP.exists():
-                self._user_left_FP.createDirectory()
-
-        # touch the file - the last time they exited will be the modification
-        # time of the file
-        self._user_left_FP.child('%s.%s' % (channel, user)).touch()
-
     def _get_user_last_exit_time(self, user, channel=None):
         """
         When the user last exited this channel.  This should probably go
@@ -216,17 +181,6 @@ class LogBot(irc.IRCClient):
             the epoch
         """
         results = {}
-        if not self._user_left_FP:
-            return results
-
-        search_pattern = "%s.%s" % (channel or '*', user)
-        matching_files = self._user_left_FP.globChildren(search_pattern)
-
-        for child in matching_files:
-            # the channel name is the filename minus ".username"
-            channel_name = child.basename()[:-(len(user) + 1)]
-            results[channel_name] = child.getModificationTime()
-
         return results
 
     # Commands
@@ -239,11 +193,10 @@ class LogBot(irc.IRCClient):
         # PM
         if channel == self.nickname:
             reply_to = user
-
-        # Mentioned in channel
-        if msg.startswith(self.nickname + ":"):
-            msg = msg[len(self.nickname) + 1:]
-            reply_to = channel
+        else:  # Mentioned in channel
+            self.msg(
+                channel, "%s: I only reply to private messages." % (user,))
+            return
 
         if reply_to:
             msg = msg.strip()
@@ -318,6 +271,7 @@ class LogBot(irc.IRCClient):
             self.msg(reply_to, '%s results returned, narrow your search' % len(results))
 
     def do_ignore(self, args):
+        self.writeLog(args, None, events.IGNORE_EVENT)
         if args in self.ignorelist:
             return "%s is already ignored, I can't ignore %s any harder!" % (args, args)
         else:
@@ -325,6 +279,7 @@ class LogBot(irc.IRCClient):
             return "I'm now ignoring %s" % args
 
     def do_unignore(self, args):
+        self.writeLog(args, None, events.UNIGNORE_EVENT)
         if args in self.ignorelist:
             self.ignorelist.remove(args)
             return "I'm paying attention to %s now" % args
@@ -333,8 +288,9 @@ class LogBot(irc.IRCClient):
 
     def action(self, user, channel, msg):
         """This will get called when the bot sees someone do an action."""
+        #TODO: parse the acutal action out here
         user = user.split('!', 1)[0]
-        self.writeLog(msg, user, channel)
+        self.writeLog(user, channel, msg, msg)
 
     # irc callbacks
 
@@ -342,11 +298,11 @@ class LogBot(irc.IRCClient):
         """Called when an IRC user changes their nickname."""
         old_nick = prefix.split('!')[0]
         new_nick = params[0]
-        self.writeLog("%s CHANGED NICK TO %s" % (old_nick, new_nick), 'SYSTEM', 'SYSTEM_LOG')
+        self.writeLog(old_nick, None, events.NICK_EVENT, new_nick)
 
     def ctcpQuery_ACTION(self, user, channel, data):
         user = user.split('!', 1)[0]
-        self.writeLog("* %s %s" % (user, data), user, channel)
+        self.writeLog(user, channel, events.CTCPQUERY_EVENT, data)
 
     def alterCollidedNick(self, nickname):
         return settings.ALT_NICK
@@ -357,6 +313,7 @@ class LogBotFactory(protocol.ClientFactory):
     def __init__(self):
         self.channels = settings.IRC_CHANNELS
         self.log_path = settings.LOG_FILE_PATH
+        self.irc_host = settings.IRC_HOST
 
     def buildProtocol(self, addr):
         p = LogBot()
