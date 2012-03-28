@@ -52,6 +52,7 @@ Notes about recent Changes and future plans
 * *DONE: rotate logs by date*
 * *FIXED* - if exactly two results are returned, it is "too large" (<2 >2)
 * *FIXED* - needs to register user enter/exit
+* **TODO** - figure out what your actual name is on the server (the one specified may be too long) - maybe join a randomly generated channel and get all names, until the list of names is 1.  and that is your bot name
 * **TODO** - add different file logger options so that if an external log rotation tool is used, it's easy to switch which file logger to use
 * **TODO** - more unit tests, particularly for the (<2 >2) fix
 * **TODO** - change log buffering so that it uses defer.DeferredSemaphore, so that if one write wedges for more than the specified interval time another thread won't be started that writes to the same file.  Maybe each file should be buffered on its own, so one file wedging won't affect another.

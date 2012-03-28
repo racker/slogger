@@ -16,7 +16,7 @@
 import time
 
 from twisted.words.protocols import irc
-from twisted.internet import reactor, protocol
+from twisted.internet import defer, threads, reactor, protocol
 from twisted.python import log, filepath
 
 import settings
@@ -26,7 +26,7 @@ from elasticsearch import ESLogLine
 
 class LogBot(irc.IRCClient):
 
-    nickname = settings.NICK
+    nickname = settings.NICK[:16]
     ignorelist = []
     _user_left_FP = None
 
@@ -52,6 +52,7 @@ class LogBot(irc.IRCClient):
 
     def signedOn(self):
         """Called when bot has succesfully signed on to server."""
+        self.setNick(self._attemptedNick)
         for channel_name in self.factory.channels:
             self.join(channel_name)
 
@@ -65,7 +66,7 @@ class LogBot(irc.IRCClient):
 
         if (channel == self.nickname) or (user in self.ignorelist) or (msg.startswith(self.nickname + ":")):
             current_time = time.time()
-            log(current_time, msg, user, channel)
+            log.msg(current_time, msg, user, channel)
         else:
             self.writeLog(msg, user, channel)
 
@@ -76,12 +77,51 @@ class LogBot(irc.IRCClient):
         When the user joins a channel, log the join
         """
         self.writeLog('%s joined the channel.' % user, None, channel)
+        # TODO: this is temporary
+        if not self._user_is_self(user):
+            last_exit_dict = self._get_user_last_exit_time(user, channel)
+            last_exit_time = last_exit_dict.get(channel, None)
+            self.msg(user, (
+                "The last time you left this channel was: %s. "
+                "Please see the history since you left here: %s" % (
+                    time.asctime(time.localtime(last_exit_time)),
+                    'this is not ready yet')))
 
     def userLeft(self, user, channel):
         """
         When the user leaves a channel, log the leave
         """
         self.writeLog('%s left the channel.' % user, None, channel)
+        # don't care about the result
+        if user != self.nickname:
+            self._record_user_last_exit_time(user, channel)
+
+    def _user_is_self(self, user):
+        """
+        Is this user the bot?  Currently there is no good way of determining
+        what the server thinks the bot's username is (if it's truncated for
+        instance).  So right now, check it against the nick, and hope for the
+        best.
+
+        @param user: username
+        @type user: C{str}
+
+        @return: true if the user is the logbot, false otherwise
+        """
+        return user == self.nickname
+
+    def _record_user_last_exit_time(self, user, channel):
+        """
+        Record the current time for the user leaving the channel.  This is
+        horrible and should probably be elsewhere.  Also, async.
+
+        @param user: the username of the user
+        @type user: C{str}
+
+        @param channel: the channel that we want to record the last exit time
+            for.
+        @type channel: C{str}
+        """
 
         # This is horrible.  Put this info somewhere else.
         if not self._user_left_FP:
@@ -94,7 +134,8 @@ class LogBot(irc.IRCClient):
 
     def _get_user_last_exit_time(self, user, channel=None):
         """
-        When the user last exited this channel
+        When the user last exited this channel.  This should probably go
+        elsewhere.  Also, async.
 
         @param user: the username of the user
         @type user: C{str}
@@ -173,7 +214,7 @@ class LogBot(irc.IRCClient):
         try:
             results = list(ESLogLine.objects.filter(query))
         except Exception as e:
-            log('ES Search Failed! - %s' % e)
+            log.msg('ES Search Failed! - %s' % e)
             if 'SearchPhaseExecutionException' in str(e):
                 return 'Invalid Query'
             else:
