@@ -31,7 +31,7 @@ root.putChild('media', static.File(path))
 
 sc = service.IServiceCollection(application)
 site = server.Site(root)
-i = internet.TCPServer(8888, site)
+i = internet.TCPServer(settings.HTTP_PORT, site)
 i.setServiceParent(sc)
 
 bot_factory = LogBotFactory()
