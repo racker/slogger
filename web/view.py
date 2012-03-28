@@ -11,8 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# -*- test-case-name: slogger.test.test_webview -*-
-
 import time
 from datetime import date
 import urllib
@@ -116,8 +114,8 @@ class FacetedMessageElement(Element, ChannelList_Mixin):
             # TODO: filter out system messages elsewhere
             if msg.channel.startswith('#'):
                 yield tag.clone().fillSlots(
-                    channel=msg.channel,
-                    username=msg.user,
+                    channel=(msg.channel or ''),
+                    username=(msg.user or ''),
                     time=time.strftime('%m/%d/%Y %H:%M:%S',
                                        time.localtime(msg.time)),
                     text=msg.message)
@@ -134,6 +132,17 @@ class FacetedMessageElement(Element, ChannelList_Mixin):
             yield tag.clone().fillSlots(
                 user_name=name,
                 user_url=_get_url_from_request(request, {'user': [name]}))
+
+    @renderer
+    def channel_name(self, request, tag):
+        channel = request.args.get('channel', [None])[0]
+        if not channel:
+            channel = self._queryset.facets.get('channel', [None])[0]
+        if not channel:
+            channel = settings.IRC_CHANNELS[0]
+        if channel:
+            return tag(channel)
+        return tag
 
 
 class NavElement(Element, ChannelList_Mixin):

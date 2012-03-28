@@ -8,6 +8,7 @@
           <li class="nav-header">Stats</li>
           <li><a href="#">Link</a></li>
           <li class="nav-header">Dates</li>
+          <li>today</li>
           <li class="nav-header">Users</li>
           <li t:render="faceted_users">
             <a><t:attr name="href"><t:slot name="user_url"/></t:attr>
@@ -17,6 +18,7 @@
         </ul>
       </div><!--/.well -->
     </div><!--/span-->
+    <h2 class="span5 offset2" t:render="channel_name"></h2>
     <div class="span9">
       <div class="irc_message row-fluid" t:render="messages">
         <div class="irc_channel span2">[<t:slot name="channel"/>]</div>
