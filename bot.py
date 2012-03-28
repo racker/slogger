@@ -17,7 +17,7 @@ import time
 
 from twisted.words.protocols import irc
 from twisted.internet import reactor, protocol
-from twisted.python import log
+from twisted.python import log, filepath
 
 import settings
 import loggers
@@ -28,6 +28,7 @@ class LogBot(irc.IRCClient):
 
     nickname = settings.NICK
     ignorelist = []
+    _user_left_FP = None
 
     def writeLog(self, message, user, channel):
         current_time = time.time()
@@ -81,6 +82,44 @@ class LogBot(irc.IRCClient):
         When the user leaves a channel, log the leave
         """
         self.writeLog('%s left the channel.' % user, None, channel)
+
+        # This is horrible.  Put this info somewhere else.
+        if not self._user_left_FP:
+            self._user_left_FP = filepath.FilePath('.lastexit')
+            self._user_left_FP.createDirectory()
+
+        # touch the file - the last time they exited will be the modification
+        # time of the file
+        self._user_left_FP.child('%s.%s' % (channel, user)).touch()
+
+    def _get_user_last_exit_time(self, user, channel=None):
+        """
+        When the user last exited this channel
+
+        @param user: the username of the user
+        @type user: C{str}
+
+        @param channel: the channel that we want to get the last exit time for.
+            If not provided, will return the last exit times for all the
+            all the channels that was recorded for that user
+        @type channel: C{str}
+
+        @return: C{dict} mapping channel names to exit times in seconds since
+            the epoch
+        """
+        results = {}
+        if not self._user_left_FP:
+            return results
+
+        search_pattern = "%s.%s" % (channel or '*', user)
+        matching_files = self._user_left_FP.globChildren(search_pattern)
+
+        for child in matching_files:
+            # the channel name is the filename minus ".username"
+            channel_name = child.basename()[:-(len(user) + 1)]
+            results[channel_name] = child.getModificationTime()
+
+        return results
 
     # Commands
 

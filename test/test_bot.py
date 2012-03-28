@@ -14,6 +14,7 @@
 import mock
 
 from twisted.trial import unittest
+from twisted.python import filepath
 
 import bot
 
@@ -28,13 +29,24 @@ class LogBotTestCase(unittest.TestCase):
                        'BufferedMultiChannelFileLogger'):
             self.patch(bot.loggers, logger, mock.MagicMock(['log']))
 
-    def _make_mock_logbot(self, channels, dirpath='./'):
+    def _make_mock_logbot(self, channels, log_path=None):
         """
         Initialize a fake logbot (to use as self to functions) and set the
         factory to a fake factory.
         """
-        fake_factory = mock.MagicMock(channels=channels, log_path=dirpath)
+        if not log_path:
+            log_path = self.mktemp()
+            fp = filepath.FilePath(log_path)
+            fp.createDirectory()
+        self.log_path = log_path
+
+        fake_factory = mock.MagicMock(channels=channels, log_path=log_path)
+
+        fp = filepath.FilePath(self.mktemp())
+        fp.createDirectory()
+
         self.fake_logbot = mock.MagicMock(bot.LogBot,
+                                          _user_left_FP=fp,
                                           factory=fake_factory)
 
     def test_join_all_channels_on_signon(self):
@@ -81,7 +93,7 @@ class LogBotTestCase(unittest.TestCase):
         """
         self._run_connection_made()
         bot.loggers.BufferedMultiChannelFileLogger.assert_called_once_with(
-            './', self.channels)
+            self.log_path, self.channels)
 
     def test_write_log(self):
         """
@@ -123,9 +135,27 @@ class LogBotTestCase(unittest.TestCase):
         Message should be logged when a user leaves the channel
         """
         self._make_mock_logbot(['#channel1'])
-        # mock calling LogBot.userJoined()
+        # mock calling LogBot.userLeft()
         bot.LogBot.userLeft.im_func(self.fake_logbot, 'me', '#channel1')
         self.assertEqual(1, self.fake_logbot.writeLog.call_count)
         # mock.call_args[0] = non-keyword arguments ([1] is keyword arguments)
         self.assertEqual((None, '#channel1'),
                          self.fake_logbot.writeLog.call_args[0][1:])
+
+    def test_user_left_channel_time_record(self):
+        """
+        When the user leaves the channel, the time at which they left, as well
+        as their username and the channel name is recorded in such a way that
+        this time can be retrieved.
+        """
+        self._make_mock_logbot(['#channel1', '#channel2'])
+        # mock calling LogBot.userLeft()
+        bot.LogBot.userLeft.im_func(self.fake_logbot, 'me', '#channel1')
+        bot.LogBot.userLeft.im_func(self.fake_logbot, 'me', '#channel2')
+        # there should be some way to get the last exit times
+        results = bot.LogBot._get_user_last_exit_time(self.fake_logbot, 'me')
+
+        # assert that the correct channels (that the user exited) were recorded
+        keys = results.keys()
+        keys.sort()
+        self.assertEqual(['#channel1', '#channel2'], keys)
