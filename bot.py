@@ -16,7 +16,7 @@
 import time
 
 from twisted.words.protocols import irc
-from twisted.internet import defer, threads, reactor, protocol
+from twisted.internet import threads, reactor, protocol
 from twisted.python import log, filepath
 
 import settings
@@ -72,7 +72,11 @@ class LogBot(irc.IRCClient):
             self.writeLog(msg, user, channel)
 
         if user not in self.ignorelist:
-            self.handle_command(user, channel, msg)
+            if channel == self.nickname:  # private message
+                self.handle_command(user, channel, msg)
+            else:
+                self.msg(
+                    channel, "%s: I only answer private messages" % (user,))
 
     def userJoined(self, user, channel):
         """
@@ -265,7 +269,7 @@ class LogBot(irc.IRCClient):
                 reply = 'logger and searchbot - try "help"'
 
             if reply:
-                self.msg(reply_to, reply)
+                self.notice(reply_to, reply)
 
     def do_search(self, query, channel, user):
         try:
