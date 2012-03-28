@@ -105,3 +105,27 @@ class LogBotTestCase(unittest.TestCase):
                 self.assertEqual(1, len(calls))
             else:
                 self.assertEqual(calls, logger.mock_calls)
+
+    def test_user_join_is_logged(self):
+        """
+        Message should be logged when a user joins the channel
+        """
+        self._make_mock_logbot(['#channel1'])
+        # mock calling LogBot.userJoined()
+        bot.LogBot.userJoined.im_func(self.fake_logbot, 'me', '#channel1')
+        self.assertEqual(1, self.fake_logbot.writeLog.call_count)
+        # mock.call_args[0] = non-keyword arguments ([1] is keyword arguments)
+        self.assertEqual((None, '#channel1'),
+                         self.fake_logbot.writeLog.call_args[0][1:])
+
+    def test_user_left_is_logged(self):
+        """
+        Message should be logged when a user leaves the channel
+        """
+        self._make_mock_logbot(['#channel1'])
+        # mock calling LogBot.userJoined()
+        bot.LogBot.userLeft.im_func(self.fake_logbot, 'me', '#channel1')
+        self.assertEqual(1, self.fake_logbot.writeLog.call_count)
+        # mock.call_args[0] = non-keyword arguments ([1] is keyword arguments)
+        self.assertEqual((None, '#channel1'),
+                         self.fake_logbot.writeLog.call_args[0][1:])

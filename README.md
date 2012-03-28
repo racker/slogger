@@ -22,7 +22,7 @@ Since a user may be in several channels, the bot should present them with severa
 
 * **TODO** Bot needs to be able to fetch all messages directed within a time range (solution: query ES for all messages within a time range)
 
-* **TODO** Web inteface needs to have a URL pointing to a specific query wrt the history of a channel within a time range, so that the bot can link to that URL when a user logs on/joins a room
+* **DONE** Web inteface needs to have a URL pointing to a specific query wrt the history of a channel within a time range, so that the bot can link to that URL when a user logs on/joins a room
 
 * **TODO** Bot needs to search all the messages for a channel in the time range the user was not around for messages mentioning the user, but not from the user.  Then it can let the user know the number of messages, or even just print the individual messages if there aren't too many.
 
@@ -51,9 +51,9 @@ Notes about recent Changes and future plans
 * *DONE: join multiple rooms*
 * *DONE: rotate logs by date*
 * *FIXED* - if exactly two results are returned, it is "too large" (<2 >2)
+* *FIXED* - needs to register user enter/exit
 * **TODO** - add different file logger options so that if an external log rotation tool is used, it's easy to switch which file logger to use
 * **TODO** - more unit tests, particularly for the (<2 >2) fix
-* **BUG** - needs to register user enter/exit
 * **TODO** - change log buffering so that it uses defer.DeferredSemaphore, so that if one write wedges for more than the specified interval time another thread won't be started that writes to the same file.  Maybe each file should be buffered on its own, so one file wedging won't affect another.
 * **TODO** - plugin system to parse irc commands
 * **TODO** - plugin system for parsing twistd command line args to config the bot/server

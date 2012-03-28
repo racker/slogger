@@ -70,6 +70,18 @@ class LogBot(irc.IRCClient):
 
         self.handle_command(user, channel, msg)
 
+    def userJoined(self, user, channel):
+        """
+        When the user joins a channel, log the join
+        """
+        self.writeLog('%s joined the channel.' % user, None, channel)
+
+    def userLeft(self, user, channel):
+        """
+        When the user leaves a channel, log the leave
+        """
+        self.writeLog('%s left the channel.' % user, None, channel)
+
     # Commands
 
     def handle_command(self, user, channel, msg):
