@@ -14,6 +14,7 @@
 # -*- test-case-name: slogger.test.test_bot -*-
 
 import time
+import urllib
 
 from twisted.words.protocols import irc
 from twisted.internet import threads, reactor, protocol
@@ -115,14 +116,13 @@ class LogBot(irc.IRCClient):
         last_exit_dict = self._get_user_last_exit_time(user, channel)
         last_exit_time = last_exit_dict.get(channel, None)
 
-        def message_the_user(substr, user, from_time):
-            self.notice(user, (
-                "The last time you left this %s was: %s.\n%s\n"
-                "Please see the history since you left here: %s" % (
-                    channel,
-                    time.asctime(time.localtime(from_time)),
-                    substr,
-                    'this is not ready yet')))
+        def message_the_user(substrs, user, from_time):
+            result = ["The last time you left this %s was: %s." % (
+                channel, time.asctime(time.localtime(from_time)))]
+            result.extend(substrs)
+            result.append("History since you left here: %s" % (
+                    'this is not ready yet'))
+            self.msg(user, '\n'.join(result))
 
         def getQueryset(from_time, username, channel_name):
             return ESLogLine.objects._get_queryset([
@@ -141,18 +141,25 @@ class LogBot(irc.IRCClient):
                 })
             ]).filter(username)
 
-        def buildSubstr(queryset):
-            result = ["You were mentioned in %d new messages." % (
-                      queryset.count())]
+        def buildSubstr(queryset, from_time, username, channel_name):
+            num = queryset.count()
+            result = ["You were mentioned in %d new messages." % (num,)]
+
+            if num > 5:
+                result.append(
+                    'There are too many to display here.  Please check the '
+                    'history.')
+                return result
+
             for query in queryset:
                 result.append('  [%s] <%s> %s' % (
                     time.asctime(time.localtime(query.time)),
                     str(query.user),
                     str(query.message)))
-            return '\n'.join(result)
+            return result
 
         d = threads.deferToThread(getQueryset, last_exit_time, user, channel)
-        d.addCallback(buildSubstr)
+        d.addCallback(buildSubstr, last_exit_time, user, channel)
         d.addCallback(message_the_user, user, last_exit_time)
 
     def _user_is_self(self, user):
@@ -257,19 +264,26 @@ class LogBot(irc.IRCClient):
                     reply = 'unignore <optional: nick> - unignores you, or a given nick'
                 elif args == 'stats':
                     reply = 'stats - returns some stats'
+                elif args == 'messages':
+                    reply == ('messages <channel> - gets a list of messages '
+                              'that were sent to you since the last time you '
+                              'exited the channel')
                 else:
-                    reply = 'commands: search, ignore, unignore'
+                    reply = 'commands: search, ignore, unignore, messages'
             elif command.lower() == 'search':
                 reply = self.do_search(args, channel, user)
             elif command.lower() == 'ignore':
                 reply = self.do_ignore(args or user)
             elif command.lower() == 'unignore':
                 reply = self.do_unignore(args or user)
+            elif command.lower() == 'messages':
+                self._pm_user_with_last_left(user, args)
+                reply = None
             else:
                 reply = 'logger and searchbot - try "help"'
 
             if reply:
-                self.notice(reply_to, reply)
+                self.msg(reply_to, reply)
 
     def do_search(self, query, channel, user):
         try:
