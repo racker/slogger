@@ -21,6 +21,7 @@ from twisted.python import log
 
 import settings
 import loggers
+from events import *
 from elasticsearch import ESLogLine
 
 
@@ -32,10 +33,8 @@ class LogBot(irc.IRCClient):
     log_user = "af3aF&G@#*@#*(#@#*(@&&FHU#IU#HJAF#(@F@#J"
 
     def writeLog(self, user, channel, event, message=None):
-        if not message:
-            message = event
         current_time = time.time()
-        msg = (current_time, message, user, channel, self.factory.irc_host, event)
+        msg = (current_time, user, channel, event, self.factory.irc_host, message)
         for logger in self.loggers:
             logger.log(*msg)
 

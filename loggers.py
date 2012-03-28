@@ -24,94 +24,77 @@ from twisted.python import log, logfile
 from elasticsearch import ESLogLine
 from twisted.internet.task import LoopingCall
 
-current_time, message, user, channel, self.factory.irc_host, event
 
 class LoggingException(Exception):
     pass
 
 
-def message_to_string(message_time, message, user, channel):
-    """
-    Generate a message string to be logged
+class BaseLogger_Mixin(object):
 
-    @param message_time: the time of the message in seconds since the Epoch.
-    @type message_time: C{float}
+    def stringify(self, event_time, user, channel, event, host, message):
+        """
+        Generate a message string to be logged
 
-    @param message: the message data
-    @type message: C{str}
+        @param message_time: the time of the message in seconds since the Epoch.
+        @type message_time: C{float}
 
-    @param user: the user who sent the data
-    @type user: C{str}
+        @param message: the message data
+        @type message: C{str}
 
-    @param channel: the name of the channel the message was sent on
-    @type channel: c{str}
-    """
-    time_string = time.asctime(time.localtime(message_time))
-    return '[%s] %s :  <%s> %s' % (channel, time_string, user, message)
+        @param user: the user who sent the data
+        @type user: C{str}
+
+        @param channel: the name of the channel the message was sent on
+        @type channel: c{str}
+        """
+        time_string = time.asctime(time.localtime(event_time))
+        return '[%s] %s :  <%s> %s (%s) @ %s' % (channel, time_string, user, event, message, host)
+
+    def dictify(self, event_time, user, channel, event, host, message):
+        """
+        Generate a dictionary to be logged
+
+        @param message_time: the time of the message in seconds since the Epoch.
+        @type message_time: C{float}
+
+        @param message: the message data
+        @type message: C{str}
+
+        @param user: the user who sent the data
+        @type user: C{str}
+
+        @param channel: the name of the channel the message was sent on
+        @type channel: c{str}
+        """
+
+        return {'message': message,
+                'user': user,
+                'channel': channel,
+                'time': event_time,
+                'host': host,
+                'event': event}
 
 
-def message_to_dict(message_time, message, user, channel, server=None, action=None):
-    """
-    Generate a dictionary to be logged
-
-    @param message_time: the time of the message in seconds since the Epoch.
-    @type message_time: C{float}
-
-    @param message: the message data
-    @type message: C{str}
-
-    @param user: the user who sent the data
-    @type user: C{str}
-
-    @param channel: the name of the channel the message was sent on
-    @type channel: c{str}
-    """
-
-    return {'message': message,
-            'user': user,
-            'channel': channel,
-            'time': message_time,
-            'server': server,
-            'action': action}
-
-
-class PyLogger(object):
+class PyLogger(BaseLogger_Mixin):
     """
     Logger that logs messages to stdout
     """
-    def log(self, message_time, message, user, channel):
+    def log(self, *args):
         """
         Logs message, formatted as per L{message_to_string}
         """
-        log.msg(message_to_string(message_time, message, user, channel))
+        log.msg(self.stringify(*args))
 
 
-class SearchLogger(object):
+class SearchLogger(BaseLogger_Mixin):
     """
     Logger that logs messages to elasticsearch
     """
-    def log(self, message_time, message, user, channel):
-        ESLogLine.objects.create(
-            **message_to_dict(message_time, message, user, channel))
+    def log(self, *args):
+        ESLogLine.objects.create(**self.dictify(*args))
 
 
-class MessageLogger:
-    """
-    Logger that logs to a file
-    """
-    def __init__(self, file):
-        self.file = file
-
-    def log(self, message_time, message, user, channel):
-        self.file.write('%s\n' %
-            (message_to_string(message_time, message, user, channel),))
-        self.file.flush()
-
-    def close(self):
-        self.file.close()
-
-
-class DailyFileLogger(logfile.DailyLogFile):
+class DailyFileLogger(logfile.DailyLogFile, BaseLogger_Mixin):
     """
     Logger logs everything to one file - it rotates daily
 
@@ -127,15 +110,14 @@ class DailyFileLogger(logfile.DailyLogFile):
         current permissions of the file if the file exists.
     @type defaultMode: C{int}
     """
-    def log(self, message_time, message, user, channel):
+    def log(self, *args):
         """
         Logs message, formatted as per L{message_to_string}
         """
-        self.write('%s\n' %
-            (message_to_string(message_time, message, user, channel),))
+        self.write('%s\n' % self.stringify(*args))
 
 
-class MultiChannelFileLogger(object):
+class MultiChannelFileLogger(BaseLogger_Mixin):
     """
     Logger that logs every channel's messages to a different file, which is
     rotated daily.  The exception is system messages, which will be logged to
@@ -175,7 +157,7 @@ class MultiChannelFileLogger(object):
         return ("Message Logger for channels %s in directory %d" %
             (', '.join(self._channel_loggers.keys()), self._directory))
 
-    def log(self, message_time, message, user, channel):
+    def log(self, event_time, user, channel, event, host, message):
         """
         If the channel is in the list of channels this logger was initialized
         with, log to the channel's corresponding L{DailyFileLogger}.
@@ -183,11 +165,10 @@ class MultiChannelFileLogger(object):
         system log file.
         """
         if channel in self._channel_loggers:
-            self._channel_loggers[channel].log(
-                message_time, message, user, channel)
+            self._channel_loggers[channel].log(event_time, user, channel, event, host, message)
         else:
             formatted_message = ('%s\n' %
-                (message_to_string(message_time, message, user, channel),))
+                (self.stringify(event_time, user, channel, event, host, message),))
 
             if channel != 'SYSTEM_LOG':
                 formatted_message = (
@@ -250,11 +231,11 @@ class BufferedMultiChannelFileLogger(MultiChannelFileLogger,
         self.loop = LoopingCall(self.flush)
         self.loop.start(interval)
 
-    def log(self, message_time, message, user, channel):
+    def log(self, *args):
         """
         Saves message to buffer, which will be written to file in intervals
         """
-        self._buffer.append((message_time, message, user, channel))
+        self._buffer.append(args)
 
 
 class BufferedSearchLogger(SearchLogger, BufferedLogger_Mixin):
@@ -276,8 +257,8 @@ class BufferedSearchLogger(SearchLogger, BufferedLogger_Mixin):
         self.loop = LoopingCall(self.flush)
         self.loop.start(interval)
 
-    def log(self, message_time, message, user, channel):
+    def log(self, *args):
         """
         Saves message to buffer, which will be written to file in intervals
         """
-        self._buffer.append((message_time, message, user, channel))
+        self._buffer.append(args)
