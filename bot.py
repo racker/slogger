@@ -27,7 +27,7 @@ from elasticsearch import ESLogLine
 class LogBot(irc.IRCClient):
 
     nickname = settings.NICK[:16]
-    ignorelist = []
+    ignorelist = [nick[:16] for nick in settings.IGNORED_USERS]
     _user_left_FP = None
 
     def writeLog(self, message, user, channel):
