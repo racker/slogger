@@ -24,6 +24,7 @@ from twisted.python import log, logfile
 from elasticsearch import ESLogLine
 from twisted.internet.task import LoopingCall
 
+current_time, message, user, channel, self.factory.irc_host, event
 
 class LoggingException(Exception):
     pass
@@ -49,7 +50,7 @@ def message_to_string(message_time, message, user, channel):
     return '[%s] %s :  <%s> %s' % (channel, time_string, user, message)
 
 
-def message_to_dict(message_time, message, user, channel):
+def message_to_dict(message_time, message, user, channel, server=None, action=None):
     """
     Generate a dictionary to be logged
 
@@ -65,10 +66,13 @@ def message_to_dict(message_time, message, user, channel):
     @param channel: the name of the channel the message was sent on
     @type channel: c{str}
     """
+
     return {'message': message,
             'user': user,
             'channel': channel,
-            'time': message_time}
+            'time': message_time,
+            'server': server,
+            'action': action}
 
 
 class PyLogger(object):
