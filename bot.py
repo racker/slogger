@@ -22,6 +22,7 @@ from twisted.python import log, filepath
 import settings
 import loggers
 from elasticsearch import ESLogLine
+from elasticsearch.core import utils
 
 
 class LogBot(irc.IRCClient):
@@ -70,7 +71,8 @@ class LogBot(irc.IRCClient):
         else:
             self.writeLog(msg, user, channel)
 
-        self.handle_command(user, channel, msg)
+        if user not in self.ignorelist:
+            self.handle_command(user, channel, msg)
 
     def userJoined(self, user, channel):
         """
@@ -79,13 +81,7 @@ class LogBot(irc.IRCClient):
         self.writeLog('%s joined the channel.' % user, None, channel)
         # TODO: this is temporary
         if not self._user_is_self(user):
-            last_exit_dict = self._get_user_last_exit_time(user, channel)
-            last_exit_time = last_exit_dict.get(channel, None)
-            self.msg(user, (
-                "The last time you left this channel was: %s. "
-                "Please see the history since you left here: %s" % (
-                    time.asctime(time.localtime(last_exit_time)),
-                    'this is not ready yet')))
+            self._pm_user_with_last_left(user, channel)
 
     def userLeft(self, user, channel):
         """
@@ -95,6 +91,65 @@ class LogBot(irc.IRCClient):
         # don't care about the result
         if user != self.nickname:
             self._record_user_last_exit_time(user, channel)
+
+    # Ugliness
+
+    def _pm_user_with_last_left(self, user, channel):
+        """
+        Private messages the user with the last time they left the channel,
+        what messages were directed at them since then, and a url with history.
+
+        TODO: file access should be asynchronous, and also don't build
+        raw queries
+
+        @param user: username
+        @type user: C{str}
+
+        @param user: channel name
+        @type user: C{str}
+        """
+        last_exit_dict = self._get_user_last_exit_time(user, channel)
+        last_exit_time = last_exit_dict.get(channel, None)
+
+        def message_the_user(substr, user, from_time):
+            self.notice(user, (
+                "The last time you left this %s was: %s.\n%s\n"
+                "Please see the history since you left here: %s" % (
+                    channel,
+                    time.asctime(time.localtime(from_time)),
+                    substr,
+                    'this is not ready yet')))
+
+        def getQueryset(from_time, username, channel_name):
+            return ESLogLine.objects._get_queryset([
+                utils.RawQuery({
+                    "query": {
+                        "term": {"channel": channel_name.lstrip('#')}  # NOOOOOOOO
+                    }
+                }),
+                utils.RawQuery({
+                    "range": {
+                        "time": {
+                            "from": from_time,
+                            "to": time.time()
+                        }
+                    }
+                })
+            ]).filter(username)
+
+        def buildSubstr(queryset):
+            result = ["You were mentioned in %d new messages." % (
+                      queryset.count())]
+            for query in queryset:
+                result.append('  [%s] <%s> %s' % (
+                    time.asctime(time.localtime(query.time)),
+                    str(query.user),
+                    str(query.message)))
+            return '\n'.join(result)
+
+        d = threads.deferToThread(getQueryset, last_exit_time, user, channel)
+        d.addCallback(buildSubstr)
+        d.addCallback(message_the_user, user, last_exit_time)
 
     def _user_is_self(self, user):
         """
@@ -126,7 +181,8 @@ class LogBot(irc.IRCClient):
         # This is horrible.  Put this info somewhere else.
         if not self._user_left_FP:
             self._user_left_FP = filepath.FilePath('.lastexit')
-            self._user_left_FP.createDirectory()
+            if not self._user_left_FP.exists():
+                self._user_left_FP.createDirectory()
 
         # touch the file - the last time they exited will be the modification
         # time of the file
@@ -166,6 +222,7 @@ class LogBot(irc.IRCClient):
 
     def handle_command(self, user, channel, msg):
 
+        log.msg('handling command')
         reply_to = None
 
         # PM
