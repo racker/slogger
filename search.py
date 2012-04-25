@@ -16,14 +16,11 @@
 from cStringIO import StringIO
 import json
 
-from twisted.internet import defer, protocol, reactor, task, threads
+from twisted.internet import defer, protocol, reactor, task
 from twisted.web.client import Agent, FileBodyProducer, ResponseDone
 from twisted.web.iweb import IBodyProducer, UNKNOWN_LENGTH
 
 from zope.interface import implements
-
-import settings
-import events
 
 
 class ESError(Exception):
@@ -59,8 +56,8 @@ class AsyncJSONProducer:
         """
         self._consumer = consumer
         self._iterable = json.JSONEncoder().iterencode(self._value)
-        self._consumer.registerProducer(self, True)
         self._task = task.cooperate(self._produce())
+        self._consumer.registerProducer(self, True)
 
         def maybeStopped(reason):
             # IBodyProducer.startProducing's Deferred isn't support to fire if
@@ -168,10 +165,10 @@ class ESAgent(object):
             or fails if there is a problem setting up a connection over which
             to issue the request.
         """
-
         d = self._agent.request(
                 method,
                 '%s%s' % (hosts_to_try[-1], uri_subpath),
+                None,
                 body_producer)
 
         d.addErrback(self._request_failed_callback, method,
@@ -209,8 +206,7 @@ class ESAgent(object):
         @return: the result of calling L{ESAgent._request_one_host} on another
             host, or fails if there are no more hosts
         """
-        #failure.printTraceback()  # log it
-
+        # failure.printTraceback()  # log it
         # pop off the last host, and decrease the score due to the failure
         self._hosts[hosts_to_try.pop(0)] -= 1
 
@@ -250,7 +246,7 @@ class ESAgent(object):
         hosts_to_try = hosts_to_try[:self._request_limit]
 
         return self._request_one_host(
-            method, uri_subpath, AsyncJSONProducer(query), hosts_to_try)
+            method, uri_subpath, FileBodyProducer(StringIO(query)), hosts_to_try)
 
 
 class ESResponseProtocol(protocol.Protocol):
@@ -278,11 +274,11 @@ class ESResponseProtocol(protocol.Protocol):
         # exception.  Well, actually callback with that failure, so that the
         # stack trace isn't lost by re-wrapping that exception in another
         # failure
-        if not reason.value is ResponseDone:
-            self._deferred.callback(reason)
-        else:
+        if reason.check(ResponseDone):
             self._data_store.seek(0)  # for reading
             self._deferred.callback(self._data_store)
+        else:
+            self._deferred.callback(reason)
 
 
 # --- the following methods are provided for utility
@@ -404,143 +400,45 @@ class SimpleESClient(object):
         @returns: a L{twisted.internet.defer.Deferred} that fires with whatever
             the protocol returns, or fails if making a request to ES fails
         """
-        d = self._agent.request('GET', '/%s/%s/_search', query)
+        d = self._agent.request('GET',
+                                '/%s/%s/_search' % (index, doctype),
+                                query)
         d.addCallback(self._handle_response)
         return d
 
     def create_index(self, *args, **kwargs):
         raise NotImplementedError
 
-
-class IRCLogSearcher(object):
-    """
-    Simple searching of IRC logs as logged by L{loggers.SearchLogger}
-
-    TODO: support thrift in the future?
-    """
-
-    _client = SimpleESClient(settings.ELASTICSEARCH_HOSTS)
-    _index = 'esloglines'
-    _doctype = 'eslogline'
-
-    def _defer_parsing_to_thread(self, response_as_file):
-        return threads.deferToThread(parse_raw_response, response_as_file)
-
-    def _searchES(self, query):
+    def index(self, index, doctype, document, doc_id=None):
         """
-        Make the request to ESAgent to search
-
-        @param query: query
-        @type query: C{dict}
+        Indexes a document
         """
-        d = self._client.search(self._index, self._doctype, query)
-        d.addCallback(self._defer_parsing_to_thread)
+        method = "POST"
+        if doc_id is not None:
+            method = "PUT"
+
+        uri = '/%s/%s/' % (index, doctype)
+        if doc_id is not None:
+            uri = '%s%s' % (uri, doc_id)
+
+        d = self._agent.request(method, uri, document)
+        d.addCallback(self._handle_response)
         return d
-
-    def get_last_exit_time(self, user, channel):
-        """
-        Find the last the the specified user left a specified channel
-
-        @param user: username
-        @type user: C{str}
-
-        @param channel: channel name
-        @type channel: C{str}
-
-        @return: a Deferred that calls back with the time in seconds since the
-            epoch, or 0 if it could not find the last time the user left the
-            channel
-        """
-        query = {
-            "sort": {
-                "time": {"order": "desc"}
-            },
-            "query": {
-                "bool": {
-                    "must": [
-                        {
-                            "query_string": {
-                                "default_field": "event",
-                                "query": events.LEAVE_EVENT
-                            }
-                        },
-                        {
-                            "query_string": {
-                                "default_field": "channel",
-                                "query": channel
-                            }
-                        },
-                        {"term": {"user": user}}
-                    ]
-                }
-            },
-            "size": 1
-        }
-
-        def isolate_time(results, facets, stats):
-            if len(results) > 0:
-                return results[0].get('time', 0)
-            return 0
-
-        d = self._searchES(query)
-        d.addCallback(isolate_time)
-        return d
-
-    def search(self, search_string=None, **kwargs):
-        """
-        Simple querying functionality
-        """
-        musts = []
-        if search_string:
-            musts.append({
-                            "query_string": {
-                                "default_field": "message",
-                                "query": search_string
-                            }
-                        })
-        for argname in kwargs:
-            if argname in ('channel' or 'event'):
-                musts.append({
-                                "query_string": {
-                                    "default_field": argname,
-                                    "query": kwargs[argname]
-                                }
-                            })
-            elif argname in ('user', 'time', 'host'):
-                musts.append({"term": {argname: kwargs[argname]}})
-
-        _from = kwargs.get('from', 0)
-        _to = kwargs.get('to', None)
-
-        if _from or _to:
-            musts.append({
-                    'range': {
-                        'time': {
-                            'from': _from,
-                            'to': _to
-                        }
-                    }
-                })
-
-        query = {
-            "sort": {
-                "time": {"order": "asc"}
-            },
-            "query": {
-                "bool": {"must": musts}
-            }
-        }
-
-        _size = kwargs.get('size', None)
-        if _size:
-            query['size'] = _size
-
-        return self._searchES(query)
-
 
 if __name__ == "__main__":
-    a = IRCLogSearcher()
-    d = a.search(user='cyli', channel='##test_slogger_room')
-    d.addCallback(a.pp)
+    a = SimpleESClient(['http://localhost:9200'])
+
+    def pp(stuff):
+        print stuff.read()
+
+    def pf(failure):
+        print 'here'
+        failure.printTraceback()
+
+    d = a.index('test', 'test', '{"user": "me", "message": "porkbun"}')
+    d.addCallback(pp)
+    d.addErrback(pf)
+    d.addCallback(reactor.stop)
+
     from twisted.internet import reactor
     reactor.run()
